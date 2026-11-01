@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 160">
+  <rect x="16" y="16" width="128" height="128" rx="32" fill="#9d4edd"/>
+  <path fill="#fff" d="M108 43H68c-14 0-23 8-23 20 0 10 6 16 19 20l23 7c5 2 7 4 7 8 0 5-4 7-11 7H45v17h40c18 0 29-9 29-26 0-11-7-19-22-23l-22-6c-5-2-7-4-7-7 0-5 4-7 11-7h34z"/>
+  <text x="176" y="106" fill="#241b2f" font-family="Segoe UI, sans-serif" font-size="76" font-weight="700">Spotique</text>
+</svg>

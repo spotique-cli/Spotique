@@ -1,0 +1,53 @@
+{
+  "name": "marketplace",
+  "version": "1.0.12",
+  "private": true,
+  "homepage": "https://github.com/spicetify/marketplace",
+  "bugs": {
+    "url": "https://github.com/spicetify/marketplace/issues"
+  },
+  "repository": "github:spicetify/marketplace",
+  "scripts": {
+    "build": "pnpm run build:local",
+    "build:local": "spicetify-creator --out=dist --minify && node scripts/rebrand-dist.mjs",
+    "build:prod": "pnpm build:local && pnpm copy:docs",
+    "copy:docs": "copyfiles README.md dist/",
+    "lint": "biome check --write ./src",
+    "lint:ci": "biome check *",
+    "type-check": "tsc --noEmit",
+    "watch": "spicetify-creator --watch",
+    "prepare": "husky",
+    "update-types": "node scripts/update-types.mjs"
+  },
+  "dependencies": {
+    "@biomejs/biome": "2.5.11",
+    "@hello-pangea/dnd": "18.0.1",
+    "chroma-js": "3.2.0",
+    "dexie": "4.4.5",
+    "i18next": "26.4.0",
+    "prismjs": "1.30.0",
+    "react-dropdown": "1.11.0",
+    "react-i18next": "17.0.12",
+    "react-simple-code-editor": "0.14.1",
+    "semver": "7.8.5",
+    "zod": "4.5.1"
+  },
+  "devDependencies": {
+    "@types/chroma-js": "3.1.2",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@types/semver": "7.8.0",
+    "@types/wicg-file-system-access": "2023.10.7",
+    "copyfiles": "2.4.1",
+    "husky": "9.1.7",
+    "spicetify-creator": "1.0.17",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": ">=24",
+    "npm": "please-use-pnpm",
+    "pnpm": ">=11",
+    "yarn": "please-use-pnpm"
+  },
+  "packageManager": "pnpm@11.9.0"
+}

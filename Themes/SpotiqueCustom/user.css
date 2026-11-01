@@ -1,0 +1,20 @@
+svg[aria-label*="Spotify" i],
+img[alt*="Spotify" i] {
+	display: none !important;
+}
+
+.main-sidebarHeader-container:has(svg[aria-label*="Spotify" i]),
+.main-topBar-topbarContent:has(svg[aria-label*="Spotify" i]) {
+	font-size: 0;
+}
+
+.main-sidebarHeader-container:has(svg[aria-label*="Spotify" i])::after,
+.main-topBar-topbarContent:has(svg[aria-label*="Spotify" i])::after {
+	content: "Spotique";
+	display: inline-block;
+	color: #9d4edd;
+	font-size: 32px;
+	font-weight: 900;
+	line-height: 1;
+	letter-spacing: -0.04em;
+}

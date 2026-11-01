@@ -1,0 +1,22 @@
+# Executables
+bin
+cli
+spotique
+spotique-cli
+*.exe
+
+# MacOS
+.DS_Store
+
+# Node.js
+node_modules
+
+# Generated wrapper bundle
+jsHelper/spotiqueWrapper.js
+jsHelper/spotiqueWrapper.js.map
+
+# Logs
+install.log
+
+# Independent public community catalog repository
+Spotique-Themes/

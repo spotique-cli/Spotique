@@ -1,0 +1,670 @@
+import React from "react";
+import type { Option } from "react-dropdown";
+import { withTranslation } from "react-i18next";
+import semver from "semver";
+
+const Spotique = window.Spotique;
+
+import { ITEMS_PER_REQUEST, LATEST_RELEASE_URL, LOCALSTORAGE_KEYS, MANIFEST_FETCH_CONCURRENCY, MARKETPLACE_VERSION } from "../constants";
+import {
+  fetchAppManifest,
+  fetchCssSnippets,
+  fetchExtensionManifest,
+  fetchThemeManifest,
+  getBlacklist,
+  getNextPage,
+  getTaggedRepos
+} from "../logic/FetchRemotes";
+import { openModal } from "../logic/LaunchModals";
+import { storedCardItemSchema } from "../logic/Schemas";
+import { marketplaceStorage } from "../logic/Storage";
+import {
+  generateSchemesOptions,
+  generateSortOptions,
+  getLocalStorageDataFromKey,
+  injectColourScheme,
+  mapWithConcurrency,
+  sortCardElements,
+  sortCardItems
+} from "../logic/Utils";
+import type { CardItem, CardType, Config, RepoSearchItem, SchemeIni, Snippet, TabItemConfig } from "../types/marketplace-types";
+import Button from "./Button";
+import Card, { type CardProps } from "./Card/Card";
+import DownloadIcon from "./Icons/DownloadIcon";
+import LoadingIcon from "./Icons/LoadingIcon";
+import LoadMoreIcon from "./Icons/LoadMoreIcon";
+import SettingsIcon from "./Icons/SettingsIcon";
+import ThemeDeveloperToolsIcon from "./Icons/ThemeDeveloperToolsIcon";
+import SortBox from "./Sortbox";
+import { TopBarContent } from "./TabBar";
+import Tooltip from "./Tooltip";
+
+type CardElement = React.ReactElement<CardProps>;
+
+class Grid extends React.Component<
+  {
+    title: string;
+    CONFIG: Config;
+    updateAppConfig: (CONFIG: Config) => void;
+    // TODO: there's probably a better way to make TS not complain about the withTranslation HOC
+    t: (key: string) => string;
+  },
+  {
+    version: string;
+    newUpdate: boolean;
+    searchValue: string;
+    cards: CardElement[];
+    tabs: TabItemConfig[];
+    rest: boolean;
+    endOfList: boolean;
+    activeThemeKey?: string;
+    schemes: SchemeIni;
+    activeScheme?: string | null;
+  }
+> {
+  constructor(props) {
+    super(props);
+    Object.assign(this, props);
+    this.updateAppConfig = props.updateAppConfig.bind(this);
+
+    this.state = {
+      version: MARKETPLACE_VERSION,
+      newUpdate: false,
+      searchValue: "",
+      cards: [],
+      tabs: props.CONFIG.tabs,
+      rest: true,
+      endOfList: false,
+      schemes: props.CONFIG.theme.schemes,
+      activeScheme: props.CONFIG.theme.activeScheme,
+      activeThemeKey: props.CONFIG.theme.activeThemeKey
+    };
+  }
+
+  searchRequested: boolean;
+  endOfList = false;
+  lastScroll = 0;
+  // Identifies the current load. Each new request (tab switch, sort change) bumps it,
+  // so a load that resolves after being replaced can tell, and stop.
+  requestId = 0;
+  requestPage = 0;
+  cardList: CardElement[] = [];
+  // TODO: why are these set up funny
+  // To get to the other side
+  gridUpdateTabs: (() => void) | null;
+  gridUpdatePostsVisual: (() => void) | null;
+  checkScroll: (e: Event) => void;
+  CONFIG: Config;
+  updateAppConfig: (CONFIG: Config) => void;
+  BLACKLIST: string[] | undefined;
+  SNIPPETS: Snippet[] | undefined;
+
+  // TODO: should I put this in Grid state?
+  getInstalledTheme() {
+    const installedThemeKey = marketplaceStorage.getItem(LOCALSTORAGE_KEYS.themeInstalled);
+    if (!installedThemeKey) return null;
+
+    const installedThemeDataStr = marketplaceStorage.getItem(installedThemeKey);
+    if (!installedThemeDataStr) return null;
+
+    const installedTheme = JSON.parse(installedThemeDataStr);
+    return installedTheme;
+  }
+
+  newRequest(amount: number | undefined) {
+    this.cardList = [];
+    this.requestId += 1;
+    this.loadAmount(this.requestId, amount);
+  }
+
+  /**
+   * Has a newer request (tab switch, sort change) replaced the one with this ID?
+   * Loads check this after every await and return -1 if so, so a replaced load
+   * never touches cardList, requestPage or endOfList.
+   */
+  isStaleRequest(requestId: number) {
+    return requestId !== this.requestId;
+  }
+
+  /**
+   * @param {CardItem} item
+   * @param type The type of card
+   */
+  appendCard(item: CardItem | Snippet, type: CardType, activeTab: string) {
+    if (activeTab !== this.props.CONFIG.activeTab) return;
+
+    const card = (
+      <Card
+        item={item}
+        // Set key prop so items don't get stuck when switching tabs
+        key={`${this.props.CONFIG.activeTab}:${item.user}:${item.title}`}
+        CONFIG={this.CONFIG}
+        visual={this.props.CONFIG.visual}
+        type={type}
+        // This isn't used other than to trigger a re-render
+        activeThemeKey={this.state.activeThemeKey}
+        // Pass along the functions to update Grid state on apply
+        updateColourSchemes={this.updateColourSchemes.bind(this)}
+        updateActiveTheme={this.setActiveTheme.bind(this)}
+      />
+    );
+
+    this.cardList.push(card);
+  }
+
+  updateSort(sortByValue) {
+    if (sortByValue) {
+      this.CONFIG.sort = sortByValue;
+      marketplaceStorage.setItem(LOCALSTORAGE_KEYS.sort, sortByValue);
+    }
+
+    // this.requestPage = null;
+    this.requestPage = 0;
+    this.cardList = [];
+    this.setState({
+      cards: [],
+      rest: false,
+      endOfList: false
+    });
+    this.endOfList = false;
+
+    this.newRequest(ITEMS_PER_REQUEST);
+  }
+
+  updateTabs() {
+    this.setState({
+      tabs: [...this.props.CONFIG.tabs]
+    });
+  }
+
+  updatePostsVisual() {
+    this.cardList = this.cardList.map((card, index) => {
+      return <Card {...card.props} key={index.toString()} CONFIG={this.CONFIG} />;
+    });
+    this.setState({ cards: [...this.cardList] });
+  }
+
+  switchTo(option: Option) {
+    this.CONFIG.activeTab = option.value;
+    marketplaceStorage.setItem(LOCALSTORAGE_KEYS.activeTab, option.value);
+    this.cardList = [];
+    // this.requestPage = null;
+    this.requestPage = 0;
+    this.setState({
+      cards: [],
+      rest: false,
+      endOfList: false
+    });
+    this.endOfList = false;
+
+    this.newRequest(ITEMS_PER_REQUEST);
+  }
+
+  async fetchRepoCards(requestId: number, repos: RepoSearchItem[], fetchManifest: (repo: RepoSearchItem) => Promise<CardItem[] | null>) {
+    const results = await mapWithConcurrency(repos, MANIFEST_FETCH_CONCURRENCY, fetchManifest, () => this.isStaleRequest(requestId));
+    return results.flatMap((items, index) => {
+      const repo = repos[index];
+      return (items ?? []).map((item) => ({
+        ...item,
+        archived: repo.archived,
+        lastUpdated: repo.pushed_at,
+        created: repo.created_at
+      }));
+    });
+  }
+
+  // This is called from loadAmount in a loop until it has the requested amount of cards or runs out of results
+  // Returns the next page number to fetch, or null if at end
+  // TODO: maybe we should rename `loadPage()`, since it's slightly confusing when we have github pages as well
+  async loadPage(requestId: number) {
+    // Store value for comparison later
+    const activeTab = this.CONFIG.activeTab;
+    switch (activeTab) {
+      case "Extensions": {
+        const pageOfRepos = await getTaggedRepos(
+          "spicetify-extensions",
+          this.requestPage,
+          this.BLACKLIST,
+          this.CONFIG.visual.showArchived,
+          this.CONFIG.sort
+        );
+        if (this.isStaleRequest(requestId)) return -1;
+
+        const extensions = await this.fetchRepoCards(requestId, pageOfRepos.items, (repo) =>
+          fetchExtensionManifest(repo.contents_url, repo.default_branch, repo.stargazers_count, this.CONFIG.visual.hideInstalled)
+        );
+        if (this.isStaleRequest(requestId)) return -1;
+
+        for (const extension of extensions) {
+          this.appendCard(extension, "extension", activeTab);
+        }
+
+        // Sort every card loaded so far, not just this page's, so later pages
+        // can still take their place at the top of the list.
+        sortCardElements(this.cardList, this.CONFIG.sort);
+        this.setState({ cards: this.cardList });
+
+        // If there are more results, return the next page number to fetch
+        const nextPage = getNextPage(this.requestPage, pageOfRepos);
+        if (nextPage) return nextPage;
+        console.debug("No more extension results");
+        break;
+      }
+      case "Installed": {
+        const installedStuff = {
+          theme: getLocalStorageDataFromKey(LOCALSTORAGE_KEYS.installedThemes, []),
+          extension: getLocalStorageDataFromKey(LOCALSTORAGE_KEYS.installedExtensions, []),
+          snippet: getLocalStorageDataFromKey(LOCALSTORAGE_KEYS.installedSnippets, [])
+        };
+
+        for (const type in installedStuff) {
+          if (installedStuff[type].length) {
+            const installedOfType: CardItem[] = [];
+            for (const itemKey of installedStuff[type]) {
+              const installedItem = storedCardItemSchema.safeParse(getLocalStorageDataFromKey(itemKey));
+              if (this.isStaleRequest(requestId)) return -1;
+
+              if (!installedItem.success) {
+                console.warn(`Skipping invalid installed item ${itemKey}`, installedItem.error);
+                continue;
+              }
+
+              installedOfType.push(installedItem.data as CardItem);
+            }
+
+            sortCardItems(installedOfType, this.CONFIG.sort);
+
+            for (const item of installedOfType) {
+              this.appendCard(item, type as CardType, activeTab);
+            }
+          }
+        }
+        this.setState({ cards: this.cardList });
+        break;
+
+        // Don't need to return a page number because
+        // installed extension do them all in one go, since it's local
+      }
+      case "Themes": {
+        const pageOfRepos = await getTaggedRepos(
+          "spicetify-themes",
+          this.requestPage,
+          this.BLACKLIST,
+          this.CONFIG.visual.showArchived,
+          this.CONFIG.sort
+        );
+        if (this.isStaleRequest(requestId)) return -1;
+
+        const themes = await this.fetchRepoCards(requestId, pageOfRepos.items, (repo) =>
+          fetchThemeManifest(repo.contents_url, repo.default_branch, repo.stargazers_count)
+        );
+        if (this.isStaleRequest(requestId)) return -1;
+
+        for (const theme of themes) {
+          this.appendCard(theme, "theme", activeTab);
+        }
+
+        // Sort every card loaded so far, not just this page's, so later pages
+        // can still take their place at the top of the list.
+        sortCardElements(this.cardList, this.CONFIG.sort);
+        this.setState({ cards: this.cardList });
+
+        // If there are more results, return the next page number to fetch
+        const nextPage = getNextPage(this.requestPage, pageOfRepos);
+        if (nextPage) return nextPage;
+        console.debug("No more theme results");
+        break;
+      }
+      case "Apps": {
+        const pageOfRepos = await getTaggedRepos(
+          "spicetify-apps",
+          this.requestPage,
+          this.BLACKLIST,
+          this.CONFIG.visual.showArchived,
+          this.CONFIG.sort
+        );
+        if (this.isStaleRequest(requestId)) return -1;
+
+        const apps = await this.fetchRepoCards(requestId, pageOfRepos.items, (repo) =>
+          fetchAppManifest(repo.contents_url, repo.default_branch, repo.stargazers_count)
+        );
+        if (this.isStaleRequest(requestId)) return -1;
+
+        for (const app of apps) {
+          this.appendCard(app, "app", activeTab);
+        }
+
+        // Sort every card loaded so far, not just this page's, so later pages
+        // can still take their place at the top of the list.
+        sortCardElements(this.cardList, this.CONFIG.sort);
+        this.setState({ cards: this.cardList });
+
+        // If there are more results, return the next page number to fetch
+        const nextPage = getNextPage(this.requestPage, pageOfRepos);
+        if (nextPage) return nextPage;
+        console.debug("No more app results");
+        break;
+      }
+      case "Snippets": {
+        const snippets = this.SNIPPETS;
+
+        if (this.isStaleRequest(requestId)) return -1;
+
+        if (snippets?.length) {
+          sortCardItems(snippets, this.CONFIG.sort);
+          for (const snippet of snippets) {
+            this.appendCard(snippet, "snippet", activeTab);
+          }
+          this.setState({ cards: this.cardList });
+        }
+      }
+    }
+
+    this.setState({ rest: true, endOfList: true });
+    this.endOfList = true;
+
+    return 0;
+  }
+  /**
+   * Load a new set of extensions
+   * @param {number} requestId The request this load belongs to (see newRequest)
+   * @param {number} [quantity] Amount of extensions to be loaded per page. (Defaults to ITEMS_PER_REQUEST constant)
+   */
+  async loadAmount(requestId: number, quantity: number = ITEMS_PER_REQUEST) {
+    this.setState({ rest: false });
+    const maxCardQuantity = this.cardList.length + quantity;
+
+    let nextPage = await this.loadPage(requestId);
+
+    while (!this.isStaleRequest(requestId) && nextPage && this.cardList.length < maxCardQuantity && !this.state.endOfList) {
+      this.requestPage = nextPage;
+      nextPage = await this.loadPage(requestId);
+    }
+
+    // A newer request owns the page counter and loading state now, so leave them alone
+    if (this.isStaleRequest(requestId)) return;
+
+    this.requestPage = nextPage;
+    this.setState({ rest: true });
+  }
+
+  /**
+   * Load more items if there are more items to load.
+   * @returns {void}
+   */
+  loadMore() {
+    if (this.state.rest && !this.endOfList) {
+      this.loadAmount(this.requestId, ITEMS_PER_REQUEST);
+    }
+  }
+
+  /**
+   * Update the colour schemes in the state + dropdown, and inject the active one
+   * @param schemes Object with the colour schemes
+   * @param activeScheme The name of the active colour scheme (a key in the schemes object)
+   */
+  updateColourSchemes(schemes: SchemeIni, activeScheme: string | null) {
+    console.debug("updateColourSchemes", schemes, activeScheme);
+    this.CONFIG.theme.schemes = schemes;
+    this.CONFIG.theme.activeScheme = activeScheme;
+    if (activeScheme) (Spotique.Config as { [key: string]: unknown }).color_scheme = activeScheme;
+
+    if (schemes && activeScheme && schemes[activeScheme]) {
+      injectColourScheme(this.CONFIG.theme.schemes[activeScheme]);
+    } else {
+      // Reset schemes if none sent
+      injectColourScheme(null);
+    }
+
+    // Save to localstorage
+    const installedThemeKey = getLocalStorageDataFromKey(LOCALSTORAGE_KEYS.themeInstalled);
+    const installedThemeData = getLocalStorageDataFromKey(installedThemeKey);
+    if (installedThemeData) {
+      installedThemeData.activeScheme = activeScheme;
+      console.debug(installedThemeData);
+      marketplaceStorage.setItem(installedThemeKey, JSON.stringify(installedThemeData));
+    } else {
+      console.debug("No installed theme data");
+    }
+
+    this.setState({
+      schemes,
+      activeScheme
+    });
+  }
+
+  /**
+   * The componentDidMount() method is called when the component is first loaded.
+   * It checks if the cardList is already loaded. If it is, it checks if the lastScroll value is
+   greater than 0.
+  * If it is, it scrolls to the lastScroll value. If it isn't, it scrolls to the top of the page.
+  * If the cardList isn't loaded, it loads the cardList.
+  */
+  async componentDidMount() {
+    // Checks for new Marketplace updates
+    fetch(LATEST_RELEASE_URL)
+      .then((res) => res.json())
+      .then(
+        (result) => {
+          if (result.message) throw result;
+          this.setState({
+            version: result.name
+          });
+
+          try {
+            this.setState({ newUpdate: semver.gt(result.name, MARKETPLACE_VERSION) });
+          } catch (err) {
+            console.error(err);
+          }
+        },
+        (error) => {
+          console.error("Failed to check for updates", error);
+        }
+      );
+
+    this.gridUpdateTabs = this.updateTabs.bind(this);
+    this.gridUpdatePostsVisual = this.updatePostsVisual.bind(this);
+
+    const viewPort = document.querySelector(".os-viewport") ?? document.querySelector("#main .main-view-container__scroll-node");
+    this.checkScroll = this.isScrolledBottom.bind(this);
+    if (viewPort) {
+      viewPort.addEventListener("scroll", this.checkScroll);
+      if (this.cardList.length) {
+        // Already loaded
+        if (this.lastScroll > 0) {
+          viewPort.scrollTo(0, this.lastScroll);
+        }
+        return;
+      }
+    }
+
+    // Load blacklist and snippets
+    this.BLACKLIST = await getBlacklist();
+    this.SNIPPETS = await fetchCssSnippets(this.CONFIG.visual.hideInstalled);
+    this.newRequest(ITEMS_PER_REQUEST);
+  }
+
+  /**
+   * When the component is unmounted, remove the scroll event listener.
+   * @returns {void}
+   */
+  componentWillUnmount(): void {
+    this.gridUpdateTabs = this.gridUpdatePostsVisual = null;
+    const viewPort = document.querySelector(".os-viewport") ?? document.querySelector("#main .main-view-container__scroll-node");
+    if (viewPort) {
+      this.lastScroll = viewPort.scrollTop;
+      viewPort.removeEventListener("scroll", this.checkScroll);
+    }
+  }
+
+  /**
+   * If the user has scrolled to the bottom of the page, load more posts.
+   * @param event - The event object that is passed to the callback function.
+   */
+  // Add scroll event listener with type
+  isScrolledBottom(event: Event): void {
+    const viewPort = event.target as HTMLElement;
+    if (viewPort.scrollTop + viewPort.clientHeight >= viewPort.scrollHeight) {
+      // At bottom, load more posts
+      this.loadMore();
+    }
+  }
+
+  setActiveTheme(themeKey: string) {
+    this.CONFIG.theme.activeThemeKey = themeKey;
+    this.setState({ activeThemeKey: themeKey });
+  }
+
+  // TODO: clean this up. It worked when I was using state, but state seems like pointless overhead.
+  getActiveScheme() {
+    return this.state.activeScheme;
+  }
+
+  render() {
+    const { t } = this.props;
+
+    const cardSections = [
+      { handle: "extension", name: "Extensions" },
+      { handle: "theme", name: "Themes" },
+      { handle: "snippet", name: "Snippets" },
+      { handle: "app", name: "Apps" }
+    ].map((cardType) => {
+      const cardsOfType = this.cardList
+        .filter((card) => card.props.type === cardType.handle)
+        .filter((card) => {
+          const searchValue = this.state.searchValue.trim().toLowerCase();
+          const { title, user, authors, tags } = card.props.item;
+
+          return (
+            !searchValue ||
+            title.toLowerCase().includes(searchValue) ||
+            user?.toLowerCase().includes(searchValue) ||
+            authors?.some((author) => author.name.toLowerCase().includes(searchValue)) ||
+            [...(tags ?? [])]?.some((tag) => tag.toLowerCase().includes(searchValue))
+          );
+        })
+        .map((card) => {
+          return React.cloneElement(card, {
+            activeThemeKey: this.state.activeThemeKey,
+            key: card.key
+          });
+        })
+        .filter((card, index, cards) => cards.findIndex((c) => c.key === card.key) === index);
+
+      if (!cardsOfType.length) return null;
+
+      return (
+        <div className="marketplace-content">
+          <h2 className="marketplace-card-type-heading">{t(`tabs.${cardType.name}`)}</h2>
+          <div className="marketplace-grid main-gridContainer-gridContainer main-gridContainer-fixedWidth" data-tab={this.CONFIG.activeTab}>
+            {cardsOfType}
+          </div>
+        </div>
+      );
+    });
+
+    const installedTabIsEmpty = this.CONFIG.activeTab === "Installed" && this.state.endOfList && cardSections.every((section) => section === null);
+
+    return (
+      <section className="contentSpacing">
+        <div className="marketplace-header">
+          <div className="marketplace-header__left">
+            {this.state.newUpdate ? (
+              <button
+                type="button"
+                title={t("grid.newUpdate")}
+                className="marketplace-header-icon-button"
+                id="marketplace-update"
+                onClick={() => openModal("UPDATE")}
+              >
+                <DownloadIcon />
+                &nbsp;{this.state.version}
+              </button>
+            ) : null}
+            {/* Generate a new box for sorting options */}
+            <h2 className="marketplace-header__label">{t("grid.sort.label")}</h2>
+            <SortBox
+              onChange={(value) => this.updateSort(value)}
+              sortBoxOptions={generateSortOptions(t)}
+              sortBySelectedFn={(a) => a.key === this.CONFIG.sort}
+            />
+          </div>
+          <div className="marketplace-header__right">
+            {/* Show theme developer tools button if themeDevTools is enabled */}
+            {this.CONFIG.visual.themeDevTools ? (
+              <Tooltip label={t("devTools.title")} renderInline={true} placement="bottom">
+                <button
+                  type="button"
+                  aria-label={t("devTools.title")}
+                  className="marketplace-header-icon-button"
+                  onClick={() => openModal("THEME_DEV_TOOLS")}
+                >
+                  <ThemeDeveloperToolsIcon />
+                </button>
+              </Tooltip>
+            ) : null}
+            {/* Show colour scheme dropdown if there is a theme with schemes installed */}
+            {this.state.activeScheme ? (
+              <SortBox
+                onChange={(value) => this.updateColourSchemes(this.state.schemes, value)}
+                // TODO: Make this compatible with the changes to the theme install process: need to create a method to update the scheme options without a full reload.
+                sortBoxOptions={generateSchemesOptions(this.state.schemes)}
+                // It doesn't work when I directly use CONFIG.theme.activeScheme in the sortBySelectedFn
+                // because it hardcodes the value into the fn
+                sortBySelectedFn={(a) => a.key === this.getActiveScheme()}
+              />
+            ) : null}
+            <div className="searchbar--bar__wrapper">
+              <input
+                className="searchbar-bar"
+                type="text"
+                placeholder={`${t("grid.search")} ${t(`tabs.${this.CONFIG.activeTab}`)}...`}
+                value={this.state.searchValue}
+                onChange={(event) => {
+                  this.setState({ searchValue: event.target.value });
+                }}
+              />
+            </div>
+            <Tooltip label={t("settings.title")} renderInline={true} placement="bottom">
+              <button
+                type="button"
+                aria-label={t("settings.title")}
+                className="marketplace-header-icon-button"
+                id="marketplace-settings-button"
+                onClick={() => openModal("SETTINGS", this.CONFIG, this.updateAppConfig)}
+              >
+                <SettingsIcon />
+              </button>
+            </Tooltip>
+          </div>
+        </div>
+        {cardSections}
+        {installedTabIsEmpty ? (
+          <div className="marketplace-empty-installed">
+            {this.state.searchValue.trim() ? t("grid.noInstalledMatches") : t("grid.nothingInstalled")}
+          </div>
+        ) : null}
+        {/* Add snippets button if on snippets tab */}
+        {this.CONFIG.activeTab === "Snippets" ? (
+          <Button classes={["marketplace-add-snippet-btn"]} onClick={() => openModal("ADD_SNIPPET")}>
+            + {t("grid.addCSS")}
+          </Button>
+        ) : null}
+        <footer className="marketplace-footer">
+          {!this.state.endOfList ? (
+            this.state.rest && this.state.cards.length > 0 ? (
+              <LoadMoreIcon onClick={this.loadMore.bind(this)} />
+            ) : (
+              <LoadingIcon />
+            )
+          ) : (
+            <div style={{ height: "64px" }} />
+          )}
+        </footer>
+        <TopBarContent switchCallback={this.switchTo.bind(this)} links={this.CONFIG.tabs} activeLink={this.CONFIG.activeTab} />
+      </section>
+    );
+  }
+}
+
+export default withTranslation()(Grid);

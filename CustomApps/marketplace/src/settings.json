@@ -1,0 +1,9 @@
+{
+  "displayName": {
+    "en": "Spotique Marketplace",
+    "ru": "Маркетплейс Spotique"
+  },
+  "nameId": "marketplace",
+  "icon": "assets/icon.svg",
+  "activeIcon": "assets/icon-filled.svg"
+}
