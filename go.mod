@@ -6,7 +6,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/go-ini/ini v1.67.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/mattn/go-colorable v0.1.15
+	github.com/mattn/go-colorable v0.1.16
 	github.com/pterm/pterm v0.12.82
 	golang.org/x/net v0.59.0
 	golang.org/x/sys v0.48.0
