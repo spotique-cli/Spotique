@@ -1,8 +1,7 @@
-<h3 align="center"><a href="https://github.com/spotique-cli/Spotique"><img src=".github/assets/logo.svg" width="320px" alt="Spotique"></a></h3>
+<h3 align="center"><a href="https://github.com/spotique-cli/Spotique"><img src=".github/assets/discord-logo-by-yvonn.png" width="180px" alt="Spotique"></a></h3>
 <p align="center">
   <a href="https://github.com/spotique-cli/Spotique/releases/latest"><img src="https://img.shields.io/github/release/spotique-cli/Spotique/all.svg?colorB=97CA00&label=latest%20version"></a>
   <a href="https://github.com/spotique-cli/Spotique/releases"><img src="https://img.shields.io/github/downloads/spotique-cli/Spotique/total.svg?colorB=97CA00&label=total%20downloads"></a>
-  <a href="https://discord.gg/VnevqPp2Rr"><img src="https://img.shields.io/discord/842219447716151306?label=chat&logo=discord&logoColor=discord"></a>
 </p>
 
 ---
@@ -35,8 +34,8 @@ local Discord IPC bridge. Discord must be running for presence updates.
 
 ### Links
 
-- [Installation](https://spicetify.app/docs/getting-started)
-- [Basic Usage](https://spicetify.app/docs/getting-started#basic-usage)
+- [Installation](#install-on-windows)
+- [Release downloads](https://github.com/spotique-cli/Spotique/releases)
 
 ---
 
