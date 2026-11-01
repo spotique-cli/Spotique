@@ -35,6 +35,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Build Spotique wrapper
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build:wrapper
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -59,6 +73,7 @@ jobs:
           go build -ldflags "-X main.version=${VERSION}" -o "$EXECUTABLE" .
 
           if [ "$GOOS" = "windows" ]; then
+            cp "$EXECUTABLE" "spotique-${GOOS}-${GOARCH}.exe"
             zip -r -9 "$ARCHIVE" "$EXECUTABLE" CustomApps Extensions Themes jsHelper globals.d.ts css-map.json
           else
             tar -czf "$ARCHIVE" "$EXECUTABLE" CustomApps Extensions Themes jsHelper globals.d.ts css-map.json

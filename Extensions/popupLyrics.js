@@ -424,7 +424,7 @@ function PopupLyrics() {
 	lyricCtx.fillRect(0, 0, 1, 1);
 	lyricVideo.play();
 
-	const button = new Spotique.Topbar.Button("Popup Lyrics", "lyrics", async () => {
+	const button = new Spotique.Playbar.Button("Popup Lyrics", "lyrics", async () => {
 		if (!lyricVideoIsOpen) {
 			try {
 				await lyricVideo.requestPictureInPicture();
@@ -440,7 +440,7 @@ function PopupLyrics() {
 			}
 		}
 	});
-	button.element.title = "Open lyrics in a separate picture-in-picture window";
+	button.tippy?.setProps({ placement: "top", delay: [400, 0], offset: [0, 8] });
 	button.element.setAttribute("aria-label", "Open lyrics in a separate picture-in-picture window");
 	button.element.oncontextmenu = openConfig;
 

@@ -1111,14 +1111,15 @@ button.switch[disabled] {
 		});
 	}
 
-	// Add activator on top bar
-	const button = new Spotique.Topbar.Button(
-		"Full App Display",
-		`<svg role="img" height="16" width="16" viewBox="0 0 16 16" fill="currentColor">${Spotique.SVGIcons.projector}</svg>`,
-		activate
+	// Add activator beside the player controls.
+	const button = new Spotique.Playbar.Button(
+		"Full App Display (Ctrl+Shift+F)",
+		"projector",
+		activate,
 	);
-	button.element.title = "Open Full App Display (Ctrl+Shift+F)";
+	button.tippy?.setProps({ placement: "top", delay: [400, 0], offset: [0, 8] });
 	button.element.setAttribute("aria-label", "Open Full App Display (Ctrl+Shift+F)");
+	button.element.setAttribute("aria-keyshortcuts", "Control+Shift+F");
 
 	Spotique.Mousetrap.bind("ctrl+shift+f", toggleFad);
 })();

@@ -153,7 +153,7 @@ const NavLinkSidebar = ({ appProper, appRoutePath, createIcon, isActive }) => {
 const NavLinkGlobal = ({ appProper, appRoutePath, createIcon, isActive }) => {
   return Spotique.React.createElement(
     Spotique.ReactComponent.TooltipWrapper,
-    { label: appProper },
+    { label: appProper, placement: "bottom" },
     Spotique.React.createElement(Spotique.ReactComponent.ButtonTertiary, {
       iconOnly: createIcon,
       className: Spotique.classnames("link-subtle", "main-globalNav-navLink", "main-globalNav-link-icon", "custom-navlink", {
